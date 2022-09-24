@@ -1,0 +1,10 @@
+train:
+  HsicBetaVAE:
+    alpha: 100
+    beta: 4
+    s_x: 100
+    s_y: 100
+    num_sample_reparam: 3
+  out_dir: "/home/wliang/miniconda3/envs/tf/lib/python3.7/site-packages/disentanglement_lib/src/results/2022Sep19-002055_train_hsicbetavae"
+  run_id: 0
+  folder_num: '0006_'

@@ -53,6 +53,21 @@ def convolute_and_save(module_path, signature, export_path, transform_fn,
       outputs = transform_fn(**intermediate_tensor)
     hub.add_signature(name=new_signature, inputs=inputs, outputs=outputs)
 
+    # Add a signature for the decoder.
+    ## TO RETRIEVE MEAN
+    # with tf.variable_scope(tf.get_variable_scope(), reuse=tf.AUTO_REUSE):
+    #   # Add a signature for the Gaussian encoder.
+    #   image_placeholder = tf.placeholder(
+    #       dtype=tf.float32, shape=[None] + observation_shape)
+    #   mean, logvar = module(dict(latent_vectors=image_placeholder), signature="gaussian_encoder", as_dict=True)
+    latent_placeholder = tf.placeholder(
+        dtype=tf.float32, shape=[None, intermediate_tensor["mean"].get_shape()[1]])
+    decoded_images = module(dict(latent_vectors=latent_placeholder), signature="decoder", as_dict=True)["images"]
+    hub.add_signature(
+        name="decoder",
+        inputs={"latent_vectors": latent_placeholder},
+        outputs={"images": decoded_images})
+
   # We create a new graph where we will build the module for export.
   with tf.Graph().as_default():
     # Create the module_spec for the export.

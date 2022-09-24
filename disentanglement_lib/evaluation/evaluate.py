@@ -29,6 +29,7 @@ from disentanglement_lib.evaluation.metrics import dci  # pylint: disable=unused
 from disentanglement_lib.evaluation.metrics import downstream_task  # pylint: disable=unused-import
 from disentanglement_lib.evaluation.metrics import factor_vae  # pylint: disable=unused-import
 from disentanglement_lib.evaluation.metrics import fairness  # pylint: disable=unused-import
+from disentanglement_lib.evaluation.metrics import hsic  # pylint: disable=unused-import
 from disentanglement_lib.evaluation.metrics import irs  # pylint: disable=unused-import
 from disentanglement_lib.evaluation.metrics import mig  # pylint: disable=unused-import
 from disentanglement_lib.evaluation.metrics import modularity_explicitness  # pylint: disable=unused-import
@@ -44,6 +45,9 @@ import tensorflow_hub as hub
 
 import gin.tf
 
+
+# tf.enable_eager_execution(config=None, device_policy=None, execution_mode=None)
+tf.disable_v2_behavior()
 
 def evaluate_with_gin(model_dir,
                       output_dir,
@@ -116,32 +120,80 @@ def evaluate(model_dir,
   dataset = named_data.get_named_ground_truth_data()
 
   # Path to TFHub module of previously trained representation.
+  # module_path_train = os.path.join(model_dir,"../../..", "model", "tfhub")
+  ### the model_dir that evaluate takes is acutually representation folder, in which the Hub is different from trained model, e.g. the signature is different!!!
+  
+
+        ## ERR: 'decoder' is not recognized
+      # def decoder_function(x):
+      #   return gaussian_encoder_model.decode(latent_vector, observation_shape, is_training)
+
+  ############# original #############
   module_path = os.path.join(model_dir, "tfhub")
   with hub.eval_function_for_module(module_path) as f:
-
     def _representation_function(x):
       """Computes representation vector for input images."""
       output = f(dict(images=x), signature="representation", as_dict=True)
+      print(type(output["default"]))
       return np.array(output["default"])
-
-    # Computes scores of the representation based on the evaluation_fn.
+    if _has_kwarg_or_kwargs(evaluation_fn, "decoder"):
+      # with hub.eval_function_for_module(module_path_train) as f2:
+        # f2 = hub.eval_function_for_module(module_path_train)
+        ### Added decoder
+        def decoder_function(x):
+          # tf.disable_v2_behavior()
+        #   # f2 = hub.eval_function_for_module(module_path_train)
+        #   # output = f2(images=x, signature="decoder", as_dict=True)
+        #   output =f(dict(latent_vectors=x), signature="decoder", as_dict=True)
+        #   # output =f2(dict(latent_vectors=x))
+        #   print("decoder:", output.keys())
+        #   return np.array(output["images"])
+            sess=tf.Session()
+            module = hub.Module(module_path) # Module instead of eval_function_for_module
+            output =module(dict(latent_vectors=x), signature="decoder", as_dict=True)
+            init=tf.global_variables_initializer()
+            sess.run(init)
+            # print("decoder:", output.keys())
+            # print(np.array(output["images"]))
+            # return output["images"]
+            return output["images"].eval(session=sess)
+          # return output["images"]
+      
+      # Computes scores of the representation based on the evaluation_fn.
     if _has_kwarg_or_kwargs(evaluation_fn, "artifact_dir"):
       artifact_dir = os.path.join(model_dir, "artifacts", name)
-      results_dict = evaluation_fn(
-          dataset,
-          _representation_function,
-          random_state=np.random.RandomState(random_seed),
-          artifact_dir=artifact_dir)
+      ### Added decoder
+      if _has_kwarg_or_kwargs(evaluation_fn, "decoder"):
+        results_dict = evaluation_fn(
+            dataset,
+            _representation_function,
+            random_state=np.random.RandomState(random_seed),
+            artifact_dir=artifact_dir,
+            decoder = decoder_function)
+      else:
+        results_dict = evaluation_fn(
+            dataset,
+            _representation_function,
+            random_state=np.random.RandomState(random_seed),
+            artifact_dir=artifact_dir)
     else:
       # Legacy code path to allow for old evaluation metrics.
       warnings.warn(
           "Evaluation function does not appear to accept an"
           " `artifact_dir` argument. This may not be compatible with "
           "future versions.", DeprecationWarning)
-      results_dict = evaluation_fn(
-          dataset,
-          _representation_function,
-          random_state=np.random.RandomState(random_seed))
+      if _has_kwarg_or_kwargs(evaluation_fn, "decoder"):
+        results_dict = evaluation_fn(
+            dataset,
+            _representation_function,
+            random_state=np.random.RandomState(random_seed),
+            decoder = decoder_function)
+      else:
+        results_dict = evaluation_fn(
+            dataset,
+            _representation_function,
+            random_state=np.random.RandomState(random_seed))
+    
 
   # Save the results (and all previous results in the pipeline) on disk.
   original_results_dir = os.path.join(model_dir, "results")

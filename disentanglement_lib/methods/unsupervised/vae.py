@@ -31,7 +31,7 @@ from six.moves import zip
 import tensorflow.compat.v1 as tf
 import gin.tf
 from tensorflow.contrib import tpu as contrib_tpu
-
+from disentanglement_lib.evaluation.metrics.hsic import HSIC
 
 class BaseVAE(gaussian_encoder_model.GaussianEncoderModel):
   """Abstract base class of a basic Gaussian encoder model."""
@@ -154,6 +154,88 @@ class BetaVAE(BaseVAE):
   def regularizer(self, kl_loss, z_mean, z_logvar, z_sampled):
     del z_mean, z_logvar, z_sampled
     return self.beta * kl_loss
+
+@gin.configurable("HsicBetaVAE")
+class HsicBetaVAE(BaseVAE):
+  """HsicBetaVAE model."""
+
+  def __init__(self, alpha=gin.REQUIRED, beta=gin.REQUIRED,
+   num_sample_reparam=gin.REQUIRED, s_x=gin.REQUIRED, s_y=gin.REQUIRED):
+    """Creates a Hsicbeta-VAE model.
+
+    Args:
+      alpha: Hyperparameter for the hsic regularizer.
+      beta: Hyperparameter for the kl weight.
+
+    Returns:
+      model_fn: Model function for TPUEstimator.
+    """
+    self.alpha = alpha
+    self.beta = beta
+    self.num_sample_reparam= num_sample_reparam
+    self.s_x = s_x
+    self.s_y = s_y
+
+  def model_fn(self, features, labels, mode, params):
+    """TPUEstimator compatible model function."""
+    del labels
+    is_training = (mode == tf.estimator.ModeKeys.TRAIN)
+    data_shape = features.get_shape().as_list()[1:]
+    z_mean, z_logvar = self.gaussian_encoder(features, is_training=is_training)
+    z_sampled = self.sample_from_latent_distribution(z_mean, z_logvar)
+    reconstructions = self.decode(z_sampled, data_shape, is_training)
+    per_sample_loss = losses.make_reconstruction_loss(features, reconstructions)
+    reconstruction_loss = tf.reduce_mean(per_sample_loss)
+    kl_loss = compute_gaussian_kl(z_mean, z_logvar)
+    hsic_loss = self.compute_hsic_reg(features, z_mean, reconstructions)
+    regularizer = self.regularizer(hsic_loss, kl_loss, z_mean, z_logvar, z_sampled)
+    loss = tf.add(reconstruction_loss, regularizer, name="loss")
+    elbo = tf.add(reconstruction_loss, kl_loss, name="elbo")
+    if mode == tf.estimator.ModeKeys.TRAIN:
+      optimizer = optimizers.make_vae_optimizer()
+      update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+      train_op = optimizer.minimize(
+          loss=loss, global_step=tf.train.get_global_step())
+      train_op = tf.group([train_op, update_ops])
+      tf.summary.scalar("reconstruction_loss", reconstruction_loss)
+      tf.summary.scalar("elbo", -elbo)
+      tf.summary.scalar("hsic_loss", hsic_loss)
+
+      logging_hook = tf.train.LoggingTensorHook({
+          "loss": loss,
+          "reconstruction_loss": reconstruction_loss,
+          "elbo": -elbo,
+          'hsic_loss': hsic_loss
+      },
+                                                every_n_iter=100)
+      return contrib_tpu.TPUEstimatorSpec(
+          mode=mode,
+          loss=loss,
+          train_op=train_op,
+          training_hooks=[logging_hook])
+    elif mode == tf.estimator.ModeKeys.EVAL:
+      return contrib_tpu.TPUEstimatorSpec(
+          mode=mode,
+          loss=loss,
+          eval_metrics=(make_metric_fn("reconstruction_loss", "elbo",
+                                       "regularizer", "kl_loss","hsic_loss"),
+                        [reconstruction_loss, -elbo, regularizer, kl_loss, hsic_loss]))
+    else:
+      raise NotImplementedError("Eval mode not supported.")
+  def compute_hsic_reg(self, features, z_mean, reconstructions):
+    hsic_score = 0
+    for i in range(self.num_sample_reparam):
+        # print('features', features.shape)
+        # print('z_mean',z_mean.shape)
+        features = tf.reshape(features, [features.shape[0],-1])
+        # z_mean = tf.reshape(z_mean, [z_mean[0],-1])
+        reconstructions = tf.reshape(reconstructions, [reconstructions.shape[0],-1])
+        hsic_score += HSIC(z_mean, reconstructions - features, self.s_x, self.s_y)
+    hsic_score /= self.num_sample_reparam
+    return hsic_score
+  def regularizer(self, hsic_loss, kl_loss, z_mean, z_logvar, z_sampled):
+    del z_mean, z_logvar, z_sampled
+    return self.beta * kl_loss + self.alpha * hsic_loss
 
 
 def anneal(c_max, step, iteration_threshold):

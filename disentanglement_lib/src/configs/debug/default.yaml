@@ -1,0 +1,54 @@
+train:
+  model:
+    batch_size: 64
+    model: "@vae()"
+    random_seed: 0
+    training_steps: 5
+  vae:
+    beta: 4
+  encoder:
+    num_latent: 10
+    encoder_fn: "@conv_encoder"
+  decoder:
+    decoder_fn: "@deconv_decoder"
+  vae_optimizer:
+    optimizer_fn: "@AdamOptimizer"
+  AdamOptimizer:
+    beta1: 0.9
+    beta2: 0.999
+    epsilon: 0.00000001
+    learning_rate: 0.0001
+    name: "\"Adam\""
+    use_locking: False
+  reconstruction_loss:
+    loss_fn: "@bernoulli_loss"
+  dataset:
+    name: "\"dsprites_full\""
+postprocess:
+  postprocess:
+    random_seed: 0
+    postprocess_fn: "@mean_representation"
+  dataset:
+    name: "\"auto\""
+  
+
+evaluation:
+  evaluation:
+    random_seed: 0
+  dataset:
+    name: "\"auto\""
+  beta_vae_sklearn:
+    batch_size: 64
+    num_train: 10 #10000
+    num_eval: 5 #5000
+  dci:
+    num_train: 10 #10000
+    num_test: 5 #5000
+  factor_vae_score:
+    num_variance_estimate: 10 #10000
+    num_train: 10 #10000
+    num_eval: 10 #5000
+    batch_size: 64
+  prune_dims:
+    threshold: 0.05
+

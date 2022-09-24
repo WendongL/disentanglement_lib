@@ -86,8 +86,7 @@ def visualize(model_dir,
   with hub.eval_function_for_module(module_path) as f:
     # Save reconstructions.
     real_pics = dataset.sample_observations(num_pics, random_state)
-    raw_pics = f(
-        dict(images=real_pics), signature="reconstructions",
+    raw_pics = f(dict(images=real_pics), signature="reconstructions",
         as_dict=True)["images"]
     pics = activation(raw_pics)
     paired_pics = np.concatenate((real_pics, pics), axis=2)

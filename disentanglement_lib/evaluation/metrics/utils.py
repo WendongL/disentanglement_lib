@@ -24,6 +24,9 @@ from sklearn import ensemble
 from sklearn import linear_model
 from sklearn import model_selection
 import gin.tf
+import tensorflow.compat.v1 as tf
+
+# tf.enable_eager_execution()
 
 
 def generate_batch_factor_code(ground_truth_data, representation_function,
@@ -60,6 +63,55 @@ def generate_batch_factor_code(ground_truth_data, representation_function,
     i += num_points_iter
   return np.transpose(representations), np.transpose(factors)
 
+def generate_batch_code_output(ground_truth_data, representation_function, decoder,
+                               num_points, random_state, batch_size):
+  """Sample a single training sample based on a mini-batch of ground-truth data.
+  for HSIC.
+
+  Args:
+    ground_truth_data: GroundTruthData to be sampled from.
+    representation_function: Function that takes observation as input and
+      outputs a representation.
+    decoder: decoder.
+    num_points: Number of points to sample.
+    random_state: Numpy random state used for randomness.
+    batch_size: Batchsize to sample points.
+
+  Returns:
+    representations: Codes (num_codes, num_points)-np array.
+    observations: samples of observations
+    outputs: reconstruction by decoding representations.
+  """
+  representations = None
+  i = 0
+  while i < num_points:
+    num_points_iter = min(num_points - i, batch_size)
+    current_factors, current_observations = \
+        ground_truth_data.sample(num_points_iter, random_state)
+
+    if i == 0:
+      observations = current_observations
+      representations = representation_function(current_observations)
+      # outputs_tensor_list = [decoder(representations1)]
+      outputs = decoder(representations)
+    else:
+      print("i>1")
+      observations = np.vstack((observations, current_observations))
+      current_representation = representation_function(current_observations)
+      representations = np.vstack((representations, current_representation))
+      outputs = np.vstack((outputs, decoder(current_representation)))
+      print("current_representation",current_representation.shape)
+      print("outputs",outputs.shape)
+    i += num_points_iter
+
+  
+  # factors, observations = ground_truth_data.sample(num_points, random_state)
+  # representations = representation_function(observations)
+  # outputs = decoder(representations)
+    
+
+
+  return representations, observations, outputs
 
 def split_train_test(observations, train_percentage):
   """Splits observations into a train and test set.
