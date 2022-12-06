@@ -26,7 +26,7 @@ def run(params):
         if folder_num in folder:
             folder_runid = os.path.join(folder, str(run_id))
     visualize(os.path.join(folder_runid,"model"),
-                os.path.join(folder_runid,"visual"),
+                os.path.join(folder_runid,"visual2"),
                 overwrite=True,
                 num_animations=5,
                 num_frames=20,

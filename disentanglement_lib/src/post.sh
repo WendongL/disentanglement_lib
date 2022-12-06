@@ -7,4 +7,4 @@ echo $CONDA_PREFIX
 module load cuda/11.3
 python --version
 cd /home/wliang/miniconda3/envs/tf/lib/python3.7/site-packages/disentanglement_lib/src/
-liftoff liftoff_postprocess.py ./results/2022Sep19-141845_post_hsicbetavae/ --gpus 0 --per-gpu 1 --procs-no 1 --results-path results
+liftoff liftoff_postprocess.py ./results/2022Oct02-095204_post_hsicdipvae/ --gpus 0 --per-gpu 2 --procs-no 2 --results-path results

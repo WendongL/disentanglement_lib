@@ -1,0 +1,42 @@
+train:
+  model:
+    name: "\"dip_vae_ii\"" #"HsicBetaVAE"
+    batch_size: 64
+    model: "@dip_vae()" #"@HsicBetaVAE()"  #"@vae()"
+    training_steps: 100000
+  dip_vae:
+    alpha: 100
+    #beta: 4
+    lambda_od: 5.0
+    lambda_d_factor: 1.0
+    dip_type: "\"ii\""
+    s_x: 100
+    s_y: 100
+    num_sample_reparam: 3
+  encoder:
+    num_latent: 10
+    encoder_fn: "@conv_encoder"
+  decoder:
+    decoder_fn: "@deconv_decoder"
+  discriminator_optimizer:
+    optimizer_fn: "@discriminator/AdamOptimizer"
+  discriminator/AdamOptimizer:
+    beta1: 0.5
+    beta2: 0.9
+    epsilon: 0.00000001
+    learning_rate: 0.0001
+    name: "\"Adam\""
+    use_locking: False
+  vae_optimizer:
+    optimizer_fn: "@vae/AdamOptimizer"
+  vae/AdamOptimizer:
+    beta1: 0.9
+    beta2: 0.999
+    epsilon: 0.00000001
+    learning_rate: 0.0001
+    name: "\"Adam\""
+    use_locking: False
+  reconstruction_loss:
+    loss_fn: "@bernoulli_loss"
+  dataset:
+    name: "\"noisy_dsprites\"" #"\"dsprites_full\""

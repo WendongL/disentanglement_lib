@@ -31,7 +31,8 @@ from six.moves import zip
 import tensorflow.compat.v1 as tf
 import gin.tf
 from tensorflow.contrib import tpu as contrib_tpu
-from disentanglement_lib.evaluation.metrics.hsic import HSIC
+from disentanglement_lib.evaluation.metrics.hsic import HSIC, HSIC_
+tf.disable_v2_behavior()
 
 class BaseVAE(gaussian_encoder_model.GaussianEncoderModel):
   """Abstract base class of a basic Gaussian encoder model."""
@@ -183,11 +184,14 @@ class HsicBetaVAE(BaseVAE):
     data_shape = features.get_shape().as_list()[1:]
     z_mean, z_logvar = self.gaussian_encoder(features, is_training=is_training)
     z_sampled = self.sample_from_latent_distribution(z_mean, z_logvar)
+    
     reconstructions = self.decode(z_sampled, data_shape, is_training)
     per_sample_loss = losses.make_reconstruction_loss(features, reconstructions)
     reconstruction_loss = tf.reduce_mean(per_sample_loss)
     kl_loss = compute_gaussian_kl(z_mean, z_logvar)
-    hsic_loss = self.compute_hsic_reg(features, z_mean, reconstructions)
+    with tf.variable_scope("decode") as scope:
+    # with tf.variable_scope(tf.get_variable_scope(),reuse=False): 
+      hsic_loss = self.compute_hsic_reg(features, z_mean, mode, scope)
     regularizer = self.regularizer(hsic_loss, kl_loss, z_mean, z_logvar, z_sampled)
     loss = tf.add(reconstruction_loss, regularizer, name="loss")
     elbo = tf.add(reconstruction_loss, kl_loss, name="elbo")
@@ -200,7 +204,7 @@ class HsicBetaVAE(BaseVAE):
       tf.summary.scalar("reconstruction_loss", reconstruction_loss)
       tf.summary.scalar("elbo", -elbo)
       tf.summary.scalar("hsic_loss", hsic_loss)
-
+      
       logging_hook = tf.train.LoggingTensorHook({
           "loss": loss,
           "reconstruction_loss": reconstruction_loss,
@@ -222,7 +226,9 @@ class HsicBetaVAE(BaseVAE):
                         [reconstruction_loss, -elbo, regularizer, kl_loss, hsic_loss]))
     else:
       raise NotImplementedError("Eval mode not supported.")
+    
   def compute_hsic_reg(self, features, z_mean, reconstructions):
+    
     hsic_score = 0
     for i in range(self.num_sample_reparam):
         # print('features', features.shape)
@@ -233,6 +239,29 @@ class HsicBetaVAE(BaseVAE):
         hsic_score += HSIC(z_mean, reconstructions - features, self.s_x, self.s_y)
     hsic_score /= self.num_sample_reparam
     return hsic_score
+  def compute_hsic_reg_v2(self, features, z_mean, mode, scope, z_logvar=0):
+    is_training = (mode == tf.estimator.ModeKeys.TRAIN)
+    data_shape = features.get_shape().as_list()[1:]
+    # batch_size = features.shape[0]
+    hsic_score = 0
+    # latent_dim = z_mean.shape[1]
+    z_sampled_list = []
+    outputs_list = []
+    for i in range(self.num_sample_reparam):
+      samples = self.sample_from_latent_distribution(z_mean, z_logvar)
+      z_sampled_list.append(samples)
+      with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
+        outputs_list.append(self.decode(samples, data_shape, is_training))
+    z_sampled_tensor = tf.stack(z_sampled_list, axis=1)
+    outputs = tf.stack(outputs_list, axis=1)
+    features = tf.expand_dims(features, axis=1)
+    features = tf.tile(features, [1,self.num_sample_reparam,1,1,1])
+    features = tf.reshape(features, [features.shape[0], features.shape[1], -1])
+    outputs = tf.reshape(outputs, [outputs.shape[0], outputs.shape[1], -1])
+    hsic_score = HSIC_(z_sampled_tensor, features - outputs)
+    return hsic_score
+
+
   def regularizer(self, hsic_loss, kl_loss, z_mean, z_logvar, z_sampled):
     del z_mean, z_logvar, z_sampled
     return self.beta * kl_loss + self.alpha * hsic_loss
@@ -260,7 +289,9 @@ class AnnealedVAE(BaseVAE):
   def __init__(self,
                gamma=gin.REQUIRED,
                c_max=gin.REQUIRED,
-               iteration_threshold=gin.REQUIRED):
+               iteration_threshold=gin.REQUIRED,
+               alpha=gin.REQUIRED,
+   num_sample_reparam=gin.REQUIRED, s_x=gin.REQUIRED, s_y=gin.REQUIRED):
     """Creates an AnnealedVAE model.
 
     Implementing Eq. 8 of "Understanding disentangling in beta-VAE"
@@ -271,14 +302,74 @@ class AnnealedVAE(BaseVAE):
       c_max: Maximum capacity of the bottleneck.
       iteration_threshold: How many iterations to reach c_max.
     """
+    self.alpha = alpha
+    self.num_sample_reparam= num_sample_reparam
+    self.s_x = s_x
+    self.s_y = s_y
     self.gamma = gamma
     self.c_max = c_max
     self.iteration_threshold = iteration_threshold
+  def model_fn(self, features, labels, mode, params):
+    """TPUEstimator compatible model function."""
+    del labels
+    is_training = (mode == tf.estimator.ModeKeys.TRAIN)
+    data_shape = features.get_shape().as_list()[1:]
+    z_mean, z_logvar = self.gaussian_encoder(features, is_training=is_training)
+    z_sampled = self.sample_from_latent_distribution(z_mean, z_logvar)
+    reconstructions = self.decode(z_sampled, data_shape, is_training)
+    per_sample_loss = losses.make_reconstruction_loss(features, reconstructions)
+    reconstruction_loss = tf.reduce_mean(per_sample_loss)
+    kl_loss = compute_gaussian_kl(z_mean, z_logvar)
+    # with tf.variable_scope("decode") as scope:
+    # with tf.variable_scope(tf.get_variable_scope(),reuse=False): 
+    hsic_loss = self.compute_hsic_reg(features, z_mean, reconstructions)
+    regularizer = self.regularizer(hsic_loss, kl_loss, z_mean, z_logvar, z_sampled)
+    loss = tf.add(reconstruction_loss, regularizer, name="loss")
+    elbo = tf.add(reconstruction_loss, kl_loss, name="elbo")
+    if mode == tf.estimator.ModeKeys.TRAIN:
+      optimizer = optimizers.make_vae_optimizer()
+      update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+      train_op = optimizer.minimize(
+          loss=loss, global_step=tf.train.get_global_step())
+      train_op = tf.group([train_op, update_ops])
+      tf.summary.scalar("reconstruction_loss", reconstruction_loss)
+      tf.summary.scalar("elbo", -elbo)
 
-  def regularizer(self, kl_loss, z_mean, z_logvar, z_sampled):
+      logging_hook = tf.train.LoggingTensorHook({
+          "loss": loss,
+          "reconstruction_loss": reconstruction_loss,
+          "elbo": -elbo
+      },
+                                                every_n_iter=100)
+      return contrib_tpu.TPUEstimatorSpec(
+          mode=mode,
+          loss=loss,
+          train_op=train_op,
+          training_hooks=[logging_hook])
+    elif mode == tf.estimator.ModeKeys.EVAL:
+      return contrib_tpu.TPUEstimatorSpec(
+          mode=mode,
+          loss=loss,
+          eval_metrics=(make_metric_fn("reconstruction_loss", "elbo",
+                                       "regularizer", "kl_loss"),
+                        [reconstruction_loss, -elbo, regularizer, kl_loss]))
+    else:
+      raise NotImplementedError("Eval mode not supported.")
+  def compute_hsic_reg(self, features, z_mean, reconstructions):
+    hsic_score = 0
+    for i in range(self.num_sample_reparam):
+        # print('features', features.shape)
+        # print('z_mean',z_mean.shape)
+        features = tf.reshape(features, [features.shape[0],-1])
+        # z_mean = tf.reshape(z_mean, [z_mean[0],-1])
+        reconstructions = tf.reshape(reconstructions, [reconstructions.shape[0],-1])
+        hsic_score += HSIC(z_mean, reconstructions - features, self.s_x, self.s_y)
+    hsic_score /= self.num_sample_reparam
+    return hsic_score
+  def regularizer(self, hsic_loss, kl_loss, z_mean, z_logvar, z_sampled):
     del z_mean, z_logvar, z_sampled
     c = anneal(self.c_max, tf.train.get_global_step(), self.iteration_threshold)
-    return self.gamma * tf.math.abs(kl_loss - c)
+    return self.gamma * tf.math.abs(kl_loss - c) + self.alpha * hsic_loss
 
 
 @gin.configurable("factor_vae")
@@ -417,7 +508,9 @@ class DIPVAE(BaseVAE):
   def __init__(self,
                lambda_od=gin.REQUIRED,
                lambda_d_factor=gin.REQUIRED,
-               dip_type="i"):
+               dip_type="i",
+               alpha=gin.REQUIRED,
+   num_sample_reparam=gin.REQUIRED, s_x=gin.REQUIRED, s_y=gin.REQUIRED):
     """Creates a DIP-VAE model.
 
     Based on Equation 6 and 7 of "Variational Inference of Disentangled Latent
@@ -430,11 +523,73 @@ class DIPVAE(BaseVAE):
         lambda_d = lambda_d_factor*lambda_od.
       dip_type: "i" or "ii".
     """
+    self.alpha = alpha
+    self.num_sample_reparam= num_sample_reparam
+    self.s_x = s_x
+    self.s_y = s_y
     self.lambda_od = lambda_od
     self.lambda_d_factor = lambda_d_factor
     self.dip_type = dip_type
+  def model_fn(self, features, labels, mode, params):
+    """TPUEstimator compatible model function."""
+    del labels
+    is_training = (mode == tf.estimator.ModeKeys.TRAIN)
+    data_shape = features.get_shape().as_list()[1:]
+    z_mean, z_logvar = self.gaussian_encoder(features, is_training=is_training)
+    z_sampled = self.sample_from_latent_distribution(z_mean, z_logvar)
+    reconstructions = self.decode(z_sampled, data_shape, is_training)
+    per_sample_loss = losses.make_reconstruction_loss(features, reconstructions)
+    reconstruction_loss = tf.reduce_mean(per_sample_loss)
+    kl_loss = compute_gaussian_kl(z_mean, z_logvar)
+    # with tf.variable_scope("decode") as scope:
+    # with tf.variable_scope(tf.get_variable_scope(),reuse=False): 
+    hsic_loss = self.compute_hsic_reg(features, z_mean, reconstructions)
+    regularizer = self.regularizer(hsic_loss, kl_loss, z_mean, z_logvar)
+    loss = tf.add(reconstruction_loss, regularizer, name="loss")
+    elbo = tf.add(reconstruction_loss, kl_loss, name="elbo")
+    if mode == tf.estimator.ModeKeys.TRAIN:
+      optimizer = optimizers.make_vae_optimizer()
+      update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+      train_op = optimizer.minimize(
+          loss=loss, global_step=tf.train.get_global_step())
+      train_op = tf.group([train_op, update_ops])
+      tf.summary.scalar("reconstruction_loss", reconstruction_loss)
+      tf.summary.scalar("elbo", -elbo)
 
-  def regularizer(self, kl_loss, z_mean, z_logvar, z_sampled):
+      logging_hook = tf.train.LoggingTensorHook({
+          "loss": loss,
+          "reconstruction_loss": reconstruction_loss,
+          "elbo": -elbo
+      },
+                                                every_n_iter=100)
+      return contrib_tpu.TPUEstimatorSpec(
+          mode=mode,
+          loss=loss,
+          train_op=train_op,
+          training_hooks=[logging_hook])
+    elif mode == tf.estimator.ModeKeys.EVAL:
+      return contrib_tpu.TPUEstimatorSpec(
+          mode=mode,
+          loss=loss,
+          eval_metrics=(make_metric_fn("reconstruction_loss", "elbo",
+                                       "regularizer", "kl_loss"),
+                        [reconstruction_loss, -elbo, regularizer, kl_loss]))
+    else:
+      raise NotImplementedError("Eval mode not supported.")
+
+  def compute_hsic_reg(self, features, z_mean, reconstructions):
+    
+    hsic_score = 0
+    for i in range(self.num_sample_reparam):
+        # print('features', features.shape)
+        # print('z_mean',z_mean.shape)
+        features = tf.reshape(features, [features.shape[0],-1])
+        # z_mean = tf.reshape(z_mean, [z_mean[0],-1])
+        reconstructions = tf.reshape(reconstructions, [reconstructions.shape[0],-1])
+        hsic_score += HSIC(z_mean, reconstructions - features, self.s_x, self.s_y)
+    hsic_score /= self.num_sample_reparam
+    return hsic_score
+  def regularizer(self, hsic_loss, kl_loss, z_mean, z_logvar):
     cov_z_mean = compute_covariance_z_mean(z_mean)
     lambda_d = self.lambda_d_factor * self.lambda_od
     if self.dip_type == "i":  # Eq 6 page 4
@@ -450,7 +605,7 @@ class DIPVAE(BaseVAE):
           cov_z, self.lambda_od, lambda_d)
     else:
       raise NotImplementedError("DIP variant not supported.")
-    return kl_loss + cov_dip_regularizer
+    return kl_loss + cov_dip_regularizer + self.alpha * hsic_loss
 
 
 def gaussian_log_density(samples, mean, log_var):

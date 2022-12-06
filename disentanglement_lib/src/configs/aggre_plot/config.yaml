@@ -1,0 +1,3 @@
+evaluation:
+  evaluation:
+    evaluation_fn: ["@beta_vae_sklearn","@factor_vae_score","@dci","@hsic"]

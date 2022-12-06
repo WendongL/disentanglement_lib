@@ -1,0 +1,50 @@
+cfg_id: 267
+evaluation:
+  dataset:
+    name: '"auto"'
+  evaluation:
+    evaluation_fn: '@factor_vae_score'
+    random_seed: 3
+  factor_vae_score:
+    batch_size: 64
+    num_eval: 5000
+    num_train: 10000
+    num_variance_estimate: 10000
+  prune_dims:
+    threshold: 0.05
+experiment_arguments:
+  evaluation:
+    evaluation:
+      random_seed: 3
+  postprocess:
+    postprocess:
+      random_seed: 0
+  train:
+    folder_num: '0011_'
+    run_id: 2
+full_title: 2022Sep25-120602_eval_hsicbetavae_factor_evaluation.evaluation.random_seed=3;
+  postprocess.postprocess.random_seed=0; train.folder_num=0011_; train.run_id=2
+out_dir: ./results/2022Sep25-120602_eval_hsicbetavae_factor/0267_evaluation.evaluation.random_seed_3__postprocess.postprocess.random_seed_0__train.folder_num_0011___train.run_id_2/0
+postprocess:
+  dataset:
+    name: '"auto"'
+  postprocess:
+    postprocess_fn: '@mean_representation'
+    random_seed: 0
+run_id: 0
+title: evaluation.evaluation.random_seed=3; postprocess.postprocess.random_seed=0;
+  train.folder_num=0011_; train.run_id=2
+train:
+  HsicBetaVAE:
+    alpha: 100
+    beta: 4
+    num_sample_reparam: 3
+    s_x: 100
+    s_y: 100
+  folder_num: '0011_'
+  model:
+    batch_size: 64
+    model: '@HsicBetaVAE()'
+    training_steps: 5
+  out_dir: /home/wliang/miniconda3/envs/tf/lib/python3.7/site-packages/disentanglement_lib/src/results/2022Sep24-232111_train_hsicbetavae_comp
+  run_id: 2

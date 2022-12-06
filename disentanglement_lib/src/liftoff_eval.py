@@ -12,6 +12,7 @@ import gin.tf
 from liftoff import parse_opts
 import argparse
 from glob import glob
+import pdb
     
 def namespace_to_dict(namespace):
     return {
@@ -19,6 +20,7 @@ def namespace_to_dict(namespace):
         for k, v in vars(namespace).items()
     }
 def run(params):
+    
     out_dir = params.train.out_dir
     run_id = params.train.run_id
     folder_num = params.train.folder_num
@@ -27,6 +29,8 @@ def run(params):
     for folder in sorted(glob(out_dir+"/*/", recursive = True)):
         if folder_num in folder:
             folder_repre_seed = os.path.join(folder, str(run_id), 'representation', '@mean_representation', str(post_seed))
+        continue
+
     file = open(folder_repre_seed + "/evaluation.gin", "w")
     file.write('# coding=utf-8')
     file.write(os.linesep)

@@ -1,0 +1,19 @@
+postprocess:
+  postprocess:
+    random_seed: 0
+    postprocess_fn: "@mean_representation"
+  dataset:
+    name: "\"auto\""
+train:
+  dip_vae:
+    alpha: 100
+    #beta: 4
+    lambda_od: 5.0
+    lambda_d_factor: 1.0
+    dip_type: "\"ii\""
+    s_x: 100
+    s_y: 100
+    num_sample_reparam: 3
+  out_dir: "/home/wliang/miniconda3/envs/tf/lib/python3.7/site-packages/disentanglement_lib/src/results/noisy_dsprites/2022Oct01-202310_train_hsicdipvae"
+  run_id: 0
+  folder_num: '0006_'

@@ -30,6 +30,7 @@ import tensorflow.compat.v1 as tf
 from tensorflow.compat.v1 import gfile
 import tensorflow_hub as hub
 import gin.tf
+import sys
 
 
 def visualize(model_dir,
@@ -119,7 +120,7 @@ def visualize(model_dir,
         dict(images=dataset.sample_observations(num_pics, random_state)),
         signature="gaussian_encoder",
         as_dict=True)
-    means = result["mean"]
+    means = result["mean"] #shape: (64,10)
     logvars = result["logvar"]
     results_dir = os.path.join(output_dir, "traversals")
     if not gfile.IsDirectory(results_dir):
@@ -272,10 +273,22 @@ def latent_traversal_1d_multi_dim(generator_fn,
   num_values = len(values)
   row_or_columns = []
   for dimension in dimensions:
+    '''
+    # The original version!
     # Creates num_values copy of the latent_vector along the first axis.
     latent_traversal_vectors = np.tile(latent_vector, [num_values, 1])
     # Intervenes in the latent space.
     latent_traversal_vectors[:, dimension] = values
+    # Generate the batch of images
+    images = generator_fn(latent_traversal_vectors)
+    # Adds images as a row or column depending whether transpose is True.
+    axis = (1 if transpose else 0)
+    row_or_columns.append(np.concatenate(images, axis))
+    '''
+    # Creates num_values copy of the latent_vector along the first axis.
+    latent_traversal_vectors = np.tile(latent_vector, [num_values, 1])
+    # Intervenes in the latent space.
+    latent_traversal_vectors[:, dimension] = values + latent_traversal_vectors[:, dimension]
     # Generate the batch of images
     images = generator_fn(latent_traversal_vectors)
     # Adds images as a row or column depending whether transpose is True.

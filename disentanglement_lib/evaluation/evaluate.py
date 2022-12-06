@@ -134,7 +134,7 @@ def evaluate(model_dir,
     def _representation_function(x):
       """Computes representation vector for input images."""
       output = f(dict(images=x), signature="representation", as_dict=True)
-      print(type(output["default"]))
+      # print(type(output["default"]))
       return np.array(output["default"])
     if _has_kwarg_or_kwargs(evaluation_fn, "decoder"):
       # with hub.eval_function_for_module(module_path_train) as f2:
